@@ -29,15 +29,17 @@ The containers run as user 10001, not root. On Linux, set `HOST_UID` in `.env` t
 
 ## Run the agent
 
-Two containers run the agent. Each runs one command and is removed when it ends.
+Two containers run the agent. Each runs one command and is removed when it ends. `admin` uses `.kube/admin` and only creates or deletes a scenario. `agent` uses `.kube/config`. `trace` and `logs` read local files.
 
-| Command | Kubeconfig | Purpose |
-| --- | --- | --- |
-| `docker compose run --rm admin scenario apply\|delete NAME` | `.kube/admin` | Applies or removes a failure scenario. It plays the person who breaks the app; it is not the agent. |
-| `docker compose run --rm agent investigate "QUESTION"` | `.kube/config` | Runs the agent and prints a JSON answer. |
-| `docker compose run --rm agent approve PROPOSAL_ID` | `.kube/config` | Applies one saved proposed fix after approval, then checks the app again. |
-| `docker compose run --rm agent eval` | `.kube/config` | Grades the agent on the three scenarios. |
-| `docker compose run --rm agent trace` / `logs` | none (local files) | Reads saved traces and log lines. |
+```bash
+docker compose run --rm admin scenario apply NAME    # break an app
+docker compose run --rm admin scenario delete NAME   # remove that scenario
+docker compose run --rm agent investigate "QUESTION" # JSON answer
+docker compose run --rm agent approve PROPOSAL_ID    # apply one saved fix, then recheck
+docker compose run --rm agent eval                   # grade the three scenarios
+docker compose run --rm agent trace                  # saved traces
+docker compose run --rm agent logs                   # saved log lines
+```
 
 The broken apps run as pods inside kind's single container, `k8s-troubleshooter-control-plane`. Use `kubectl` to see them.
 
