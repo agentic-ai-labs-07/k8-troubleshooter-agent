@@ -1,0 +1,8 @@
+# The local cluster for this project, used by the README setup and by CI.
+# Keep the node version within one minor version of KUBECTL_VERSION in the Dockerfile.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: k8s-troubleshooter
+nodes:
+  - role: control-plane
+    image: kindest/node:v1.31.4

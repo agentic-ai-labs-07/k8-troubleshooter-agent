@@ -1,0 +1,136 @@
+# The agent's own identity, enforced by Kubernetes even if the code has a bug.
+# Cluster-wide it may only list pods, to find which namespace an app is in.
+# Logs, events, ConfigMaps, and Deployments are readable only in the three app namespaces below.
+# It may patch one Deployment: not-ready-app, in namespace not-ready-app. No Secrets, no exec, no delete.
+# This file owns the app namespaces, so deleting a scenario does not remove the agent's access.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: k8s-troubleshooter
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: k8s-troubleshooter
+  namespace: k8s-troubleshooter
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: k8s-troubleshooter
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: k8s-troubleshooter
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: k8s-troubleshooter
+subjects:
+  - kind: ServiceAccount
+    name: k8s-troubleshooter
+    namespace: k8s-troubleshooter
+---
+# What the four tools read inside one namespace. Granted per namespace by the RoleBindings below.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: k8s-troubleshooter-read
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "configmaps"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["list"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get"]
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: crashing-app
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: k8s-troubleshooter-read
+  namespace: crashing-app
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: k8s-troubleshooter-read
+subjects:
+  - kind: ServiceAccount
+    name: k8s-troubleshooter
+    namespace: k8s-troubleshooter
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: not-ready-app
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: k8s-troubleshooter-read
+  namespace: not-ready-app
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: k8s-troubleshooter-read
+subjects:
+  - kind: ServiceAccount
+    name: k8s-troubleshooter
+    namespace: k8s-troubleshooter
+---
+# The one approved fix: the not-ready-app Deployment in namespace not-ready-app, and nothing else.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: k8s-troubleshooter-fix
+  namespace: not-ready-app
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    resourceNames: ["not-ready-app"]
+    verbs: ["patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: k8s-troubleshooter-fix
+  namespace: not-ready-app
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: k8s-troubleshooter-fix
+subjects:
+  - kind: ServiceAccount
+    name: k8s-troubleshooter
+    namespace: k8s-troubleshooter
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: missing-config-app
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: k8s-troubleshooter-read
+  namespace: missing-config-app
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: k8s-troubleshooter-read
+subjects:
+  - kind: ServiceAccount
+    name: k8s-troubleshooter
+    namespace: k8s-troubleshooter

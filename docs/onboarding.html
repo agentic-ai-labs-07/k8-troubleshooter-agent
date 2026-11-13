@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>k8s-troubleshooter: onboarding</title>
+<style>
+  :root { --fg: #1f2328; --muted: #59636e; --line: #d1d9e0; --box: #f6f8fa; --accent: #0969da; --warn: #9a6700; }
+  @media (prefers-color-scheme: dark) {
+    :root { --fg: #e6edf3; --muted: #9198a1; --line: #3d444d; --box: #151b23; --accent: #4493f8; --warn: #d29922; }
+    body { background: #0d1117; }
+  }
+  body { font: 16px/1.55 system-ui, sans-serif; color: var(--fg); max-width: 920px; margin: 0 auto; padding: 24px; }
+  h1 { margin-bottom: 4px; }
+  h2 { margin-top: 40px; border-bottom: 1px solid var(--line); padding-bottom: 6px; }
+  .muted { color: var(--muted); }
+  code { background: var(--box); padding: 1px 5px; border-radius: 4px; font-size: 0.92em; }
+  pre { background: var(--box); padding: 12px; border-radius: 6px; overflow-x: auto; }
+  pre code { padding: 0; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  nav a { margin-right: 14px; }
+  a { color: var(--accent); }
+  .flow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 16px 0; }
+  .step { border: 1px solid var(--line); background: var(--box); border-radius: 8px; padding: 8px 12px; text-align: center; min-width: 110px; }
+  .step small { display: block; color: var(--muted); }
+  .arrow { color: var(--muted); font-size: 20px; }
+  .write { border-color: var(--warn); }
+  .pages { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+  .pages a { border: 1px solid var(--line); background: var(--box); border-radius: 8px; padding: 8px 12px; text-decoration: none; }
+  .pages small { display: block; color: var(--muted); }
+  iframe { width: 100%; height: 80vh; border: 1px solid var(--line); border-radius: 8px; }
+</style>
+</head>
+<body>
+
+<h1>k8s-troubleshooter</h1>
+<p class="muted">One page to understand the project. How to run it is in <a href="../README.md">README.md</a>, which also holds the design rationale.</p>
+<nav><a href="#pages">Visual pages</a><a href="#flow">How one run works</a><a href="#demo">Demo</a><a href="#read">Reading order</a><a href="#files">Files</a><a href="#safety">Safety</a><a href="#python">Python for Node devs</a></nav>
+
+<h2 id="pages">Visual pages</h2>
+<p>Made with Archify. Pick one to show it below, or open it full size from <code>docs/onboarding/</code>.</p>
+<div class="pages">
+  <a href="onboarding/c4.html" target="viewer">C4 levels<small>Big picture down to code</small></a>
+  <a href="onboarding/level-2.html" target="viewer">Level 2<small>Where each part of a run lives</small></a>
+  <a href="onboarding/one-run.html" target="viewer">One run<small>What a run is made of</small></a>
+  <a href="onboarding/one-question.html" target="viewer">One question<small>Question, answer, then one yes</small></a>
+</div>
+<iframe name="viewer" src="onboarding/c4.html" title="Archify page"></iframe>
+
+<h2 id="flow">How one run works</h2>
+<p>You ask a question. The agent loops: the model picks one tool, the tool reads the cluster, the model sees the result. It stops when the model answers or after 8 model calls.</p>
+<div class="flow">
+  <div class="step">Your question<small>cli.py</small></div><span class="arrow">→</span>
+  <div class="step">Agent loop<small>agent/graph.py (LangGraph)</small></div><span class="arrow">⇄</span>
+  <div class="step">Model<small>llm/: OpenAI, or rules</small></div><span class="arrow">→</span>
+  <div class="step">One of 4 tools<small>tools/kubernetes.py</small></div><span class="arrow">→</span>
+  <div class="step">kind cluster<small>clients/kubectl.py, limited login</small></div>
+</div>
+<div class="flow">
+  <div class="step">Answer<small>cause, evidence, next step</small></div><span class="arrow">→</span>
+  <div class="step write">You approve<small>approve ID</small></div><span class="arrow">→</span>
+  <div class="step write">One port change<small>not-ready-app only</small></div><span class="arrow">→</span>
+  <div class="step">Re-check<small>fresh evidence</small></div>
+</div>
+<p>Every step is written to <code>traces/&lt;run_id&gt;.jsonl</code> (OpenTelemetry) and printed live as one log line. The orange boxes are the only write, and only for the <code>not-ready-app</code> scenario.</p>
+
+<table>
+  <tr><th>Tool</th><th>Reads</th><th>Example finding</th></tr>
+  <tr><td><code>get_pod_status</code></td><td>Pods in every namespace</td><td><code>crashing-app</code> is in CrashLoopBackOff</td></tr>
+  <tr><td><code>get_events</code></td><td>What Kubernetes recorded for one pod</td><td>Readiness probe failed on 8081</td></tr>
+  <tr><td><code>get_pod_logs</code></td><td>What the app printed (secrets hidden)</td><td><code>unknown APP_MODE bogus</code></td></tr>
+  <tr><td><code>get_setup</code></td><td>Ports, health check, settings (secrets hidden)</td><td>App listens on 8080</td></tr>
+</table>
+
+<h2 id="demo">Demo in two terminals</h2>
+<pre><code># terminal 1: create a broken app
+docker compose run --rm admin scenario apply crashing-app
+
+# terminal 2: watch it live
+kubectl --kubeconfig .kube/admin get pods -n crashing-app -w
+
+# terminal 1: ask the agent (prints each step, then JSON)
+docker compose run --rm agent investigate "Why is crashing-app unhealthy?"
+
+# grade the model on all three scenarios (apply all three first)
+docker compose run --rm agent eval</code></pre>
+
+<table>
+  <tr><th>Scenario</th><th>Namespace</th><th>What is wrong</th><th>Fix allowed</th></tr>
+  <tr><td><code>crashing-app</code></td><td><code>crashing-app</code></td><td><code>APP_MODE=bogus</code>, the app exits</td><td>No</td></tr>
+  <tr><td><code>not-ready-app</code></td><td><code>not-ready-app</code></td><td>Health check on 8081, app on 8080</td><td>Yes, after approve</td></tr>
+  <tr><td><code>missing-config-app</code></td><td><code>missing-config-app</code></td><td>ConfigMap <code>app-settings</code> missing</td><td>No</td></tr>
+</table>
+
+<h2 id="read">Reading order</h2>
+<ol>
+  <li><code>README.md</code>: what you type and what comes back.</li>
+  <li><code>src/k8s_troubleshooter/cli.py</code>: the front door. Commands <code>investigate</code>, <code>eval</code>, <code>approve</code>, <code>scenario</code>.</li>
+  <li><code>src/k8s_troubleshooter/tools/kubernetes.py</code>: the four tools the model may call.</li>
+  <li><code>src/k8s_troubleshooter/safety/</code>: what is allowed, and how secrets are hidden.</li>
+  <li><code>scenarios/not-ready-app/manifest.yaml</code>: one planted failure.</li>
+  <li><code>src/k8s_troubleshooter/agent/graph.py</code>: the loop and the answer check. Then <code>agent/remediation.py</code> for approve.</li>
+  <li><code>src/k8s_troubleshooter/evals/</code> and <code>tests/</code>: how we know an answer is right.</li>
+</ol>
+
+<h2 id="files">Files</h2>
+<p>Under <code>src/k8s_troubleshooter/</code>. React terms in brackets, as a rough guide.</p>
+<table>
+  <tr><th>File</th><th>What it does</th></tr>
+  <tr><td><code>cli.py</code></td><td>Parses commands, sets up logging, prints JSON. Exit 0 = answer, 1 = an eval failed, 2 = refused or failed. (The screen.)</td></tr>
+  <tr><td><code>agent/graph.py</code>, <code>state.py</code>, <code>prompts.py</code>, <code>schemas.py</code></td><td>The LangGraph loop, what it carries between steps, the system prompt, and the answer shape. (The container component and its state.)</td></tr>
+  <tr><td><code>agent/remediation.py</code></td><td>Saves a proposal, applies it after approve, and checks again.</td></tr>
+  <tr><td><code>llm/provider.py</code>, <code>llm/rule_based.py</code></td><td>Picks the model: OpenAI by default, or the rule-based stand-in with <code>AGENT_MODEL=rules</code>. Another provider is one branch here. (The API client factory.)</td></tr>
+  <tr><td><code>clients/kubectl.py</code>, <code>clients/kubernetes.py</code></td><td>The only place kubectl runs, with fixed arguments and no shell, and the cluster reads plus the one patch. (axios and the API module.)</td></tr>
+  <tr><td><code>tools/kubernetes.py</code></td><td>The four tools the model may call. Every result goes through secret hiding.</td></tr>
+  <tr><td><code>safety/guardrails.py</code>, <code>safety/redaction.py</code></td><td>Allowed names, ports, question length, advice, and the one fix; and secret hiding. (Validation middleware.)</td></tr>
+  <tr><td><code>observability/tracing.py</code></td><td>One OpenTelemetry file per run, plus the live log line per step.</td></tr>
+  <tr><td><code>evals/scenarios.py</code>, <code>evals/graders.py</code></td><td>The three scenarios, their expected facts, and the checks. Used by <code>eval</code> and the tests.</td></tr>
+  <tr><td><code>config.py</code>, <code>exceptions.py</code></td><td>Settings from environment variables, and the two error types.</td></tr>
+  <tr><td><code>scenarios/</code></td><td>One Kubernetes manifest per failure, each with a healthy neighbor app.</td></tr>
+  <tr><td><code>tests/</code></td><td>Unit tests on a fake cluster, plus kind tests when both logins exist.</td></tr>
+  <tr><td><code>Dockerfile</code>, <code>docker-compose.yml</code></td><td>One image. Two services: <code>agent</code> (limited login, key as a secret file) and <code>admin</code> (scenarios only).</td></tr>
+  <tr><td><code>kind.yaml</code>, <code>rbac.yaml</code>, <code>scripts/setup-access.sh</code></td><td>The cluster, the agent's Kubernetes permissions, and the two logins.</td></tr>
+  <tr><td><code>.env.example</code></td><td>Settings to copy into <code>.env</code>: model, key, limits, log level.</td></tr>
+  <tr><td><code>.github/workflows/ci.yml</code></td><td>Starts kind, runs the tests, builds the image.</td></tr>
+</table>
+
+<h2 id="safety">Safety in layers</h2>
+<table>
+  <tr><th>Layer</th><th>What it stops</th></tr>
+  <tr><td>Code (<code>tools/</code>, <code>safety/guardrails.py</code>)</td><td>The model can only call four reads. No shell. Questions over 500 characters are refused. Advice with a command or a destructive word is blocked. The one write needs your approval, must match the live app, and runs once.</td></tr>
+  <tr><td>Secrets (<code>safety/redaction.py</code>)</td><td>Every tool result, including events and errors, has secret-looking values replaced with <code>&lt;redacted&gt;</code> before the model or the trace sees it.</td></tr>
+  <tr><td>Kubernetes (<code>rbac.yaml</code>)</td><td>The agent's login expires in 1 hour. It may list pods everywhere, read only in the three app namespaces, and patch only <code>not-ready-app</code>. Even buggy code is refused Secrets, delete, exec, and <code>kube-system</code> logs.</td></tr>
+  <tr><td>Container (<code>Dockerfile</code>, <code>docker-compose.yml</code>)</td><td>Runs as a non-root user with all Linux capabilities dropped. Base image and CI actions pinned by digest and commit.</td></tr>
+</table>
+<p>Logs and events are untrusted text and can carry planted orders. The prompt says to ignore them, and the layers above hold even if the model obeys. Known limits are listed in the Safety section of <a href="../README.md">README.md</a>.</p>
+
+<h2 id="python">Python for Node devs</h2>
+<table>
+  <tr><th>Python</th><th>Node equivalent</th></tr>
+  <tr><td><code>pyproject.toml</code></td><td><code>package.json</code></td></tr>
+  <tr><td><code>pip install -e ".[dev]"</code></td><td><code>npm install</code> (with devDependencies)</td></tr>
+  <tr><td><code>.venv/</code></td><td><code>node_modules/</code></td></tr>
+  <tr><td><code>[project.scripts]</code></td><td><code>"bin"</code> in package.json</td></tr>
+  <tr><td><code>from k8s_troubleshooter.agent.graph import investigate</code></td><td><code>import { investigate } from "./agent/graph"</code></td></tr>
+  <tr><td><code>pytest</code>, files named <code>test_*.py</code></td><td><code>jest</code>, files named <code>*.test.js</code></td></tr>
+  <tr><td><code>with ... as x:</code></td><td><code>try/finally</code> that always cleans up</td></tr>
+</table>
+
+</body>
+</html>

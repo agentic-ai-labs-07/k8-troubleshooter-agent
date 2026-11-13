@@ -1,0 +1,58 @@
+x-common: &common
+  build: .
+  image: k8s-troubleshooter:local
+  networks: [kind]
+  # Never root. On Linux, set HOST_UID to your `id -u` so the mounted .kube/ and traces/ work.
+  user: "${HOST_UID:-10001}"
+  # Not read_only: Compose writes the environment-sourced secret into the container.
+  security_opt: ["no-new-privileges:true"]
+  cap_drop: [ALL]
+
+# The agent: investigate and approve, with the ServiceAccount token only.
+services:
+  agent:
+    <<: *common
+    environment:
+      KUBECONFIG: /kube/config
+      KUBE_SERVER: https://k8s-troubleshooter-control-plane:6443
+      AGENT_MODEL: ${AGENT_MODEL:-live}
+      OPENAI_API_KEY_FILE: /run/secrets/openai_api_key
+      OPENAI_MODEL: ${OPENAI_MODEL:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      AGENT_MAX_STEPS: ${AGENT_MAX_STEPS:-8}
+      AGENT_MAX_TOKENS: ${AGENT_MAX_TOKENS:-1024}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FORMAT: ${LOG_FORMAT:-text}
+      K8S_TROUBLESHOOTER_SERVICE: agent
+      K8S_TROUBLESHOOTER_ROOT: /app
+      TRACE_DIR: /traces
+    volumes:
+      - ./.kube/config:/kube/config:ro
+      - ./traces:/traces
+    secrets: [openai_api_key]
+
+  # Same image with kind's admin login. Only for `scenario apply` and `scenario delete`.
+  admin:
+    <<: *common
+    environment:
+      KUBECONFIG: /kube/admin
+      KUBE_SERVER: https://k8s-troubleshooter-control-plane:6443
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FORMAT: ${LOG_FORMAT:-text}
+      K8S_TROUBLESHOOTER_SERVICE: admin
+      K8S_TROUBLESHOOTER_ROOT: /app
+      TRACE_DIR: /traces
+    volumes:
+      - ./.kube/admin:/kube/admin:ro
+      - ./traces:/traces
+
+# The key reaches the agent as a file, so it is not in `docker inspect` or `docker compose config`.
+# Compose reads OPENAI_API_KEY from .env or from your shell.
+secrets:
+  openai_api_key:
+    environment: OPENAI_API_KEY
+
+# kind creates this Docker network. Joining it lets the containers reach the cluster by name.
+networks:
+  kind:
+    external: true
